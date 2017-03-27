@@ -1,0 +1,10 @@
+*__pycache__*
+*~
+*/__pycache__/*
+doc/build/doctrees/*
+*.log
+*.xls
+dist/*
+*.spec
+*.txt
+*.egg-info
