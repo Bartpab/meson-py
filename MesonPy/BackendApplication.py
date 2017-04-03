@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import websockets
+import sys
 
 from MesonPy.FrontalController import BackendFrontalController, Kernel
 from MesonPy.Communication.Pipeline import CommunicationPipeline
@@ -72,12 +73,17 @@ class BackendApplication:
         finally:
             logger.info('Disconnection %s', websocket)
             self.onClosingPipeline(pipeline)
-            asyncio.get_event_loop().stop()
+            #asyncio.get_event_loop().stop()
 
     def run(self):
         start_server = websockets.serve(self.handler, '127.0.0.1', 4242)
         loop = asyncio.get_event_loop()
-        logger.info('Starting server at 127.0.0.1:4242')
+
+        #Std out MEOW
+        sys.stdout.write('0x4D454F57')
+        sys.stdout.flush()
+
+        logger.info('Started server at 127.0.0.1:4242')
         loop.run_until_complete(start_server)
         loop.run_forever()
         logger.info('Closing server at 127.0.0.1:4242')
