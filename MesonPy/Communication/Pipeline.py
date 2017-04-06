@@ -18,8 +18,11 @@ class ReceivedMessagePipeline:
 
     @asyncio.coroutine
     def process(self):
-        message = yield from self.pipeline.recv_message()
-        self.getRootHandler().co.send(message)
+        try:
+            message = yield from self.pipeline.recv_message()
+            self.getRootHandler().co.send(message)
+        except Exception as e:
+            return
 
 class SendMessagePipeline:
     def __init__(self, pipeline):
@@ -45,6 +48,7 @@ class CommunicationPipeline:
         self.outcomingPipeline = SendMessagePipeline(self)
         self.incomingPipeline = ReceivedMessagePipeline(self)
         self.processIncomingMessageCo = self.process_co()
+        self.wsClosingFuture = None
 
     def getIncomingPipeline(self):
         return self.incomingPipeline
@@ -64,10 +68,17 @@ class CommunicationPipeline:
     def close(self):
         if self._close:
             return
+
         logger.info('Closing the pipeline of %s', self.websocket)
         self._close = True
+
+        tasks = [self.consumer_task, self.producer_task, self.process_task]
+
+        for task in tasks:
+            task.cancel()
+
         # Wait for closing
-        yield from self.close_websocket()
+        self.wsClosingFuture = asyncio.ensure_future(self.close_websocket())
 
     @asyncio.coroutine
     def recv_message(self):
@@ -78,7 +89,6 @@ class CommunicationPipeline:
 
     @asyncio.coroutine
     def send(self, sendMsg):
-        print('Schedule to send %s to %s', sendMsg, self.websocket)
         yield from self.sendQueue.put(sendMsg)
 
     @asyncio.coroutine
@@ -90,21 +100,34 @@ class CommunicationPipeline:
         except websockets.exceptions.ConnectionClosed as e:
             logger.warning('The websocket had been closed')
         finally:
-            logger.info('Exiting pipeline consumer coroutine of %s', self.websocket)
+            logger.info('Closing incoming pipeline of %s', self.websocket)
             self.close()
 
     @asyncio.coroutine
     def produce(self):
         try:
             while not self._close:
-                message = yield from self.sendQueue.get()
-                print('Sending %s to %s', message, self.websocket)
-                yield from self.websocket.send(message)
+                if self.sendQueue is None:
+                    break
+                try:
+                    message = yield from self.sendQueue.get()
+                except Exception as e:
+                    continue
+
+                logger.debug('Sending %s to %s', message, self.websocket)
+
+                try:
+                    yield from asyncio.wait_for(self.websocket.send(message), 5)
+                except asyncio.TimeoutError as e:
+                    logger.warning('Time out on %s', message)
+
+                logger.debug('Sent %s to %s', message, self.websocket)
+        except Exception as e:
+            logger.error(e)
+            raise e
         finally:
-            logger.info('Exiting pipeline producer coroutine of %s', self.websocket)
+            logger.info('Closing outcoming pipeline of %s', self.websocket)
             self.close()
-
-
     @asyncio.coroutine
     def process_co(self):
         try:
@@ -112,6 +135,7 @@ class CommunicationPipeline:
                 yield from self.getIncomingPipeline().process()
         except Exception as e:
             logger.error(e)
+            raise e
         finally:
             logger.info('Closing incoming message processor')
 
@@ -119,15 +143,19 @@ class CommunicationPipeline:
     def run(self):
         logger.info('Running communication pipeline for %s', self.websocket)
         try:
-            consumer_task = asyncio.ensure_future(self.consume())
-            producer_task = asyncio.ensure_future(self.produce())
+            self.consumer_task = asyncio.ensure_future(self.consume())
+            self.producer_task = asyncio.ensure_future(self.produce())
             # Run a concurrent task to process our incoming messages
-            process_task = asyncio.ensure_future(self.processIncomingMessageCo)
-
+            self.process_task = asyncio.ensure_future(self.processIncomingMessageCo)
             # If at least one had finished, exit the pipeline
-            done, pending = yield from asyncio.wait([consumer_task, producer_task, process_task], return_when=asyncio.FIRST_COMPLETED)
+            done, pending = yield from asyncio.wait([self.consumer_task, self.producer_task, self.process_task], return_when=asyncio.FIRST_COMPLETED)
         finally:
             logger.info('Exiting communication pipeline for %s', self.websocket)
+
+    @asyncio.coroutine
+    def wait_close(self):
+        tasks = [self.consumer_task, self.producer_task, self.process_task, self.wsClosingFuture]
+        yield from asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
 
     def __str__(self):
         return 'Communication Pipeline, addr={}, ws state={}'.format(self.websocket.remote_address, self.websocket.state_name)

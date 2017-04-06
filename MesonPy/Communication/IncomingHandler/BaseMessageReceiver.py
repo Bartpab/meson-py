@@ -9,6 +9,7 @@ class BaseReceivedMessageHandler:
     """
     def __init__(self, parent=None):
         self.childs = []
+        self.coChilds = []
         # Get coroutine
         self.co = self.messageReceived()
         next(self.co)
@@ -23,6 +24,9 @@ class BaseReceivedMessageHandler:
     def intercept(self, recvMsg):
         raise NotImplementedError()
 
+    def sendTo(self, coroutine):
+        self.coChilds.append(coroutine)
+        
     @asyncio.coroutine
     def messageReceived(self):
         while True:
@@ -32,3 +36,5 @@ class BaseReceivedMessageHandler:
             if not stop:
                 for child in self.childs:
                     child.co.send(interceptedMessage)
+                for coChild in self.coChilds:
+                    coChild.send(interceptedMessage)

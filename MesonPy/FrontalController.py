@@ -3,10 +3,15 @@ import asyncio
 import functools
 from uuid import uuid4
 
+import MesonPy.Constants as Constants
+
+from MesonPy.Communication.Duplex import Duplex
+
+from MesonPy.Communication.IncomingHandler.OperationRouter import BackendOperationRouter
+from MesonPy.Communication.OutcomingHandler.OperationRouter import BackendOperationReturnRouter, PushOperationRouter
 
 from MesonPy.Communication.IncomingHandler.BaseMessageReceiver import BaseReceivedMessageHandler
 from MesonPy.Processor.Processor import InstructionContext
-from MesonPy.Processor.Processor import RPCProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -30,102 +35,50 @@ class ObjectManager:
         obj = objectClass()
         self.registerInstance(obj, objectClass)
 
-class StackContext:
-    def __init__(self):
-        self.services = {}
-    def register(self, name, service):
-        self.services[name] = service
-    def get(self, name):
-        return self.services[name]
+class BackendFrontalController:
+    def __init__(self, kernel, lowerLevelDuplex):
+        self.lowerLevelDuplex = lowerLevelDuplex
 
-class Kernel:
-    def __init__(self):
-        self._close = False
-        self.processors = []
-        self.rpc = RPCProcessor()
-        self.processors.append(self.rpc)
+        self.operationRequestDuplex = Duplex(BackendOperationRouter(self.lowerLevelDuplex.incoming),                                                            BackendOperationReturnRouter(self.lowerLevelDuplex.outcoming))
 
-    def addProcessor(self, processor):
-        self.processors.append(processor)
-        return self
+        self.pushHandler = PushOperationRouter(self.lowerLevelDuplex.outcoming)
 
-    def getStackContext(self):
-        return
+        opRequestCoroutine = self.operationRequestGenerator()
+        next(opRequestCoroutine)
+        self.operationRequestDuplex.incoming.sendTo(opRequestCoroutine)
 
-    def close(self):
-        if not self._close:
-            self._close = True
-            logger.info('Exiting kernel')
-
-    @asyncio.coroutine
-    def run(self):
-        tasks = {}
-        while not self._close:
-            stackContext = self.getStackContext()
-            for proc in self.processors:
-                if proc not in tasks:
-                    tasks[proc] = asyncio.ensure_future(proc.step(stackContext))
-            # Wait until one of the processors had finished its task
-            done, pending = yield from asyncio.wait([task for task in tasks.values()], return_when= asyncio.FIRST_COMPLETED)
-            #
-            logger.debug('Instructions done %s', done)
-            # Free the processor which task is done
-            free = []
-            for done_task in done:
-                for proc, task in tasks.items():
-                    if task == done_task:
-                        free.append(proc)
-            for free_proc in free:
-                tasks.pop(free_proc)
-
-    def findSuitableProcessor(self, instructionCtx):
-        suitableProcessors = []
-        for processor in self.processors:
-            if processor.canHandleOperation(instructionCtx):
-                suitableProcessors.append(processor)
-        if len(suitableProcessors) == 0:
-            logger.warning('No suitable processor found for instruction context %s', instructionCtx)
-            return None
-        elif len(suitableProcessors) > 1:
-            raise Exception('Many processors could handle this instruction')
-        else:
-            return suitableProcessors[0]
-
-    def stackForExecution(self, instructionCtx):
-        logger.info('Stacking for execution, context=%s', instructionCtx)
-        processor = self.findSuitableProcessor(instructionCtx)
-
-        if processor is not None:
-            logger.debug('instruction=%s, proc=%s', instructionCtx, processor)
-            processor.push(instructionCtx)
-        else:
-            logger.warning('No processor found to execute this instruction, execution cancelled, context=%s', instructionCtx)
-
-
-class BackendFrontalController(BaseReceivedMessageHandler):
-    def __init__(self, kernel, requestHandler, responseHandler):
-        BaseReceivedMessageHandler.__init__(self, requestHandler)
-        self.responseHandler = responseHandler
         self.kernel = kernel
-        self.kernelTask = asyncio.ensure_future(self.kernel.run())
-        asyncio.ensure_future(self.kernelTask)
+        # Register the front as a session
+        sessionService = self.kernel.getContext().service(Constants.SERVICE_SESSION)
+        self.session = sessionService.new(self)
 
     def request_done(self, uid, future):
         """
             The kernel had returned a response from the instruction
         """
-        logger.info('Instruction done, uid=%s', uid)
-        instruction = future.result() # Get the result of our request. Might had failed though, send it anyway
-        self.responseHandler.co.send((uid, instruction))
+        # Get the result of our request. Might had failed though, send it anyway
+        instruction = future.result()
+        self.operationRequestDuplex.outcoming.co.send((uid, instruction))
 
-    def intercept(self, recvMsg):
-        logger.debug('Instruction %s', recvMsg)
-        uid, opcode, payload = recvMsg
-        future = asyncio.Future()
-        future.add_done_callback(functools.partial(self.request_done, uid))
-        instrCtx = InstructionContext(opcode, payload, future)
-        self.kernel.stackForExecution(InstructionContext(opcode, payload, future))
-        return instrCtx, False
+    @asyncio.coroutine
+    def operationRequestGenerator(self):
+        while True:
+            uid, opcode, payload = yield
+            logger.debug('Operation %s', opcode)
+            future = asyncio.Future()
+            future.add_done_callback(functools.partial(self.request_done, uid))
+            instrCtx = InstructionContext(opcode, payload, future, self.session)
+            self.kernel.stackForExecution(instrCtx)
+
+    @asyncio.coroutine
+    def operationPushGenerator(self):
+        pass
+
+    def push(self, instructionCtx):
+        self.pushHandler.co.send(uuid4().int, instructionCtx)
+
+    def exit(self):
+        pass
 
 class FrontendFrontalController(BaseReceivedMessageHandler):
     def __init__(self, incomingHandler, outcomingHandler):

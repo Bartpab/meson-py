@@ -78,12 +78,13 @@ class FrontendApplication:
             logger.info('Pipeline initialized.')
             pipelineOpening.set_result(pipeline)
             yield from pipeline.run()
+
         except Exception as e:
             logger.error(e)
+
         finally:
             logger.info('Disconnection %s', websocket)
-            yield from pipeline.close()
-            asyncio.get_event_loop().stop()
+            pipeline.close()
 
     def start(self, addr="127.0.0.1", port="4242"):
         pipelineOpening = asyncio.Future()
@@ -93,3 +94,8 @@ class FrontendApplication:
 
         pipelineOpening.result()
         logger.info('Backend is avalailable!')
+
+    def exit(self):
+        if self.pipeline is not None:
+            self.pipeline.close()
+        asyncio.get_event_loop().run_until_complete(asyncio.ensure_future(self.pipeline.wait_close()))
