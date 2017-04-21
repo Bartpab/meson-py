@@ -106,8 +106,8 @@ class FrontendFrontalController(BaseReceivedMessageHandler):
         logger.debug('Instruction %s had been executed and returned, uid=%s, ret=%s, error=%s', instructionContext, uid, ret, error)
 
         if error not in (None, 'None'):
-            logger.error('Backend error: %s', error)
-            raise Exception(error)
+            logger.error('Backend error: type=%s, message=%s', error['name'], error['message'])
+            raise Exception(error['message'])
         else:
             return ret
 

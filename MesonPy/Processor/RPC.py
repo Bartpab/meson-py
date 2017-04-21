@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import functools
+import inspect
 
 logger = logging.getLogger(__name__)
 
@@ -14,15 +15,22 @@ class RPCInstruction:
         self.methodName = methodName
         self.method = method
 
+    @asyncio.coroutine
     def executeLogic(self, procCtx):
         executableMethod = procCtx.injectArgs(self.method)
-        return executableMethod()
+
+        ret = executableMethod()
+
+        if inspect.isgenerator(ret):
+            ret = yield from asyncio.ensure_future(executableMethod())
+
+        return ret
 
     def canHandleInstruction(self, instructionCtx):
         return 'method' in instructionCtx.payload and instructionCtx.payload['method'] == self.methodName
 
     def __str__(self):
-        return 'Remote Procedure Call, method={}'.format(self.methodName)
+        return '{}'.format(self.methodName)
 
 import inspect
 class RPCExecutionContext:
@@ -55,7 +63,9 @@ class RPCService:
         self.rpcProcessor = rpcProcessor
     def register(self, name, method):
         self.rpcProcessor.register(name, method)
-
+class UnknownRemoteProcedure(Exception):
+    def __init__(self, procedureName):
+        Exception.__init__(self, 'Unknown Remote Procedure "{}" is called'.format(procedureName))
 class RPCProcessor(iProcessor):
     def __init__(self):
         self.instructions = {}
@@ -67,7 +77,6 @@ class RPCProcessor(iProcessor):
     def findSuitableInstruction(self, instructionCtx):
         suitableInstructions = []
         for name, instruction in self.instructions.items():
-            logger.debug('{} : {}'.format(name, instruction))
             if instruction.canHandleInstruction(instructionCtx):
                 suitableInstructions.append(instruction)
 
@@ -96,9 +105,13 @@ class RPCProcessor(iProcessor):
         try:
             logger.info('Will handle instruction request %s', instructionCtx)
             instruction = self.findSuitableInstruction(instructionCtx)
+
+            if instruction is None:
+                raise UnknownRemoteProcedure(instructionCtx.payload['method'])
+
             logger.info('Found executable logic for instruction request %s, logic=%s', instructionCtx, instruction)
             logger.info('Execute RPC %s', instructionCtx)
-            instructionCtx.ret = instruction.executeLogic(RPCExecutionContext(instructionCtx))
+            instructionCtx.ret = yield from asyncio.ensure_future(instruction.executeLogic(RPCExecutionContext(instructionCtx)))
             logger.info('RPC %s had been executed', instructionCtx)
 
         except Exception as e:

@@ -11,23 +11,24 @@ from contextlib import suppress
 import MesonPy.Constants as Constants
 
 from MesonPy.FrontalController import BackendFrontalController
-from MesonPy.Processor.Kernel import BackendKernel
+from MesonPy.Processor.Kernel import BackendKernel, ServiceManager
 from MesonPy.Communication.Duplex import Duplex
 from MesonPy.Communication.Pipeline import CommunicationPipeline
 
 from MesonPy.Communication.OutcomingHandler.FormatRouter import OutcomingJSONRouter
 from MesonPy.Communication.IncomingHandler.FormatRouter import IncomingJSONRouter
 
+from MesonPy.Service.ServiceInjector import ServiceInjector
 
 logger = logging.getLogger(__name__)
 
 def rpcAction(app, controller, action):
     def wrapper(*args, __session__):
+        instanceManager = app.getSharedService(Constants.SERVICE_INSTANCE)
         keywords = [arg for arg in inspect.getfullargspec(action).args if (arg is not 'self' and arg is not 'instanceContext')]
-        logger.debug(keywords)
+
         kargs = {keywords[i]: args[i] for i in range(len(keywords))}
-        kargs['self'] = controller
-        kargs['instanceContext'] = app.getInstanceContext(__session__)
+        kargs['instanceContext'] = instanceManager.getBySession(__session__)
 
         controllerAction = functools.partial(action, **kargs)
 
@@ -57,25 +58,81 @@ def fetchClasses(module, classes = None, visited = None, filter = None):
     return classes
 
 def getControllers(controllerModule):
-    builders = fetchClasses(controllerModule, None, None, lambda obj: re.match("(.*?)Controller", obj.__name__))
-    return builders
+    controllers = fetchClasses(controllerModule, None, None, lambda obj: re.match("(.*?)Controller", obj.__name__))
+    return controllers
 
 class InstanceContext:
-    def __init__(self, session):
+    """
+        An instance context hold all local data bound to a session.
+
+        The instance context is injected in controller actions, each time the client is calling the backend logic
+        through RPC calls.
+
+        There are local services, shared services, local data pool, shared data pool, etc.
+    """
+    def __init__(self, session, sharedServiceManager):
         self.session = session
+        self.sharedServiceManager = sharedServiceManager
+        self.localServiceManager = ServiceManager()
+
+    def getLocalService(self, name):
+        return self.localServiceManager.get(name)
+    def addLocalService(self, name, service):
+        self.localServiceManager.register(name, service)
+
+class InstanceManager:
+    """
+        Manage all instances
+    """
+    def __init__(self, appContext):
+        self.sharedServiceManager = appContext.getSharedServiceManager()
+
+        self.sharedServiceManager.get(Constants.SERVICE_SESSION).onNew(self.newInstance)
+        self.serviceInjector = self.sharedServiceManager.get(Constants.SERVICE_SERVICE_INJECTOR)
+
+        self.newCallbacks = set()
+        self.instances = {}
+
+    def getBySession(self, session):
+        return self.instances[session.id]
+
+    def onNew(self, callback):
+        self.newCallbacks.add(callback)
+
+    def newInstance(self, session):
+        instanceCtx = InstanceContext(session, self.sharedServiceManager)
+
+        for localServiceCls in self.serviceInjector.getLocalServiceClasses():
+            locServiceName = self.serviceInjector.generateLocalServiceName(localServiceCls)
+            instanceCtx.addLocalService(locServiceName, localServiceCls(instanceCtx))
+
+        self.instances[session.id] = instanceCtx
+
+        for callback in self.newCallbacks:
+            callback(instanceCtx)
+
+class BackendApplicationContext:
+    def __init__(self, app):
+        self.app = app
+
+    def getSharedServiceManager(self):
+        return self.app.getSharedServiceManager()
+    def addSharedService(self, name, service):
+        self.app.addSharedService(name, service)
+    def getSharedService(self, name):
+        return self.app.getSharedService(name)
 
 class BackendApplication:
     def __init__(self):
         self.kernel = BackendKernel()
         self.fronts = {}
-        self.instances = {}
-
+        self.context = BackendApplicationContext(self)
         self.boot()
 
     def boot(self):
-        self.sessionManager = self.getService(Constants.SERVICE_SESSION)
-        self.sessionManager.onNew(self.newInstance)
-        self.rpcService = self.getService(Constants.SERVICE_RPC)
+        self.addSharedService(Constants.SERVICE_SERVICE_INJECTOR, ServiceInjector(self.context))
+        self.addSharedService(Constants.SERVICE_INSTANCE, InstanceManager(self.context))
+        self.rpcService = self.getSharedService(Constants.SERVICE_RPC)
 
     # Pipeline Event Management
     @asyncio.coroutine
@@ -93,28 +150,28 @@ class BackendApplication:
             self.fronts[uid].exit()
             del self.fronts[uid]
 
-    def getService(self, name):
+    def getSharedServiceManager(self):
+        return self.kernel.getContext().serviceManager
+    def getSharedService(self, name):
         return self.kernel.getContext().service(name)
+    def addSharedService(self, name, service):
+        self.kernel.getContext().register_service(name, service)
 
-    def newInstance(self, session):
-        self.instances[session.id] = InstanceContext(session)
-    def getInstanceContext(self, session):
-        return self.instances[session.id]
     def generateRPCName(self, controllerName, actionName):
         return 'com.rpc.controllers.{}.{}'.format(controllerName, actionName)
 
     def loadControllers(self, module):
         controllers = getControllers(module)
         for controller in controllers:
-            self.addController(controller)
+            self.addController(controller())
 
     # Serve controller actions as rpc calls in a session context
     def addController(self, controller):
-        m = re.search(r'(?P<name>\w+)Controller', controller.__name__)
+        m = re.search(r'(?P<name>\w+)Controller', controller.__class__.__name__)
         if m is not None:
             controllerName = m.group('name')
         else:
-            logger.warning('Invalid controller name for {}'.format(controller.__name__))
+            logger.warning('Invalid controller name for {}'.format(controller.__class__.__name__))
             return
 
         logger.info('Found controller {}'.format(controllerName))
@@ -170,10 +227,7 @@ class BackendApplication:
             pipeline.close()
             #Wait for the pipeline to close
             yield from asyncio.ensure_future(pipeline.wait_close())
-
             asyncio.get_event_loop().stop()
-
-
 
     def run(self):
         self.start_server = websockets.serve(self.handler, '127.0.0.1', 4242)

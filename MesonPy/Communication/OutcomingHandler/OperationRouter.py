@@ -20,7 +20,10 @@ class BackendOperationReturnRouter(BaseSendMessageHandler):
             "__ticket__": ticket,
             "__operation__": instruction.operationType,
             "__return__": instruction.ret,
-            "__error__": str(instruction.error)
+            "__error__": None if instruction.error is None else {
+                'name': instruction.error.__class__.__name__,
+                'message': str(instruction.error)
+            }
         }
         return normalizedData, False
 
