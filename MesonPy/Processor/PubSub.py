@@ -92,9 +92,7 @@ class PubSubProcessor(iProcessor):
             instructionCtx = yield from self.executionQueue.get()
         except RuntimeError:
             return
-        except TypeError:
-            return
-
+            
         if instructionCtx['type'] == 'subscribe':
             self.subscribeClient(instructionCtx.session,
                            instructionCtx.payload['topic'],

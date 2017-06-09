@@ -54,4 +54,5 @@ class ServiceInjector:
         services = getServices(module)
         for serviceClass in services:
             logger.info('Found shared service class {}'.format(serviceClass.__name__))
-            self.appContext.addSharedServices(serviceClass(self.appContext))
+            m = re.search(r"^(?P<name>\w+)Service$", serviceClass.__name__)
+            self.appContext.addSharedService('services.shared.' + m.group('name'), serviceClass(self.appContext))

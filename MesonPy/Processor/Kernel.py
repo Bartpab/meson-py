@@ -120,8 +120,6 @@ class BackendKernel:
                             free.append(proc)
                 for free_proc in free:
                     tasks.pop(free_proc)
-            except TypeError as e:
-                continue
             except Exception as e:
                 logger.error(e)
 

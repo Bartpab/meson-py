@@ -74,7 +74,8 @@ class InstanceContext:
         self.session = session
         self.sharedServiceManager = sharedServiceManager
         self.localServiceManager = ServiceManager()
-
+    def getSharedService(self, name):
+        return self.sharedServiceManager.get(name)
     def getLocalService(self, name):
         return self.localServiceManager.get(name)
     def addLocalService(self, name, service):
@@ -137,6 +138,7 @@ class BackendApplication:
     # Pipeline Event Management
     @asyncio.coroutine
     def onOpenningPipeline(self, pipeline):
+        handshake = yield from pipeline.websocket.recv()
         yield from pipeline.websocket.send('handshake')
         result = yield from pipeline.websocket.recv()
         if result:
@@ -230,7 +232,7 @@ class BackendApplication:
             asyncio.get_event_loop().stop()
 
     def run(self):
-        self.start_server = websockets.serve(self.handler, '127.0.0.1', 4242)
+        self.start_server = websockets.serve(self.handler, '127.0.0.1', 4242, max_size=None)
 
         loop = asyncio.get_event_loop()
 

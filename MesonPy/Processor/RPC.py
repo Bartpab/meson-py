@@ -99,8 +99,6 @@ class RPCProcessor(iProcessor):
             instructionCtx = yield from self.executionQueue.get()
         except RuntimeError:
             return
-        except TypeError:
-            return
 
         try:
             logger.info('Will handle instruction request %s', instructionCtx)
