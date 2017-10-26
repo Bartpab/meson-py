@@ -5,8 +5,10 @@ import sys
 import functools
 import re
 import inspect
+import jwt
+import bcrypt
+import socket
 
-from contextlib import suppress
 
 import MesonPy.Constants as Constants
 
@@ -124,7 +126,11 @@ class BackendApplicationContext:
         return self.app.getSharedService(name)
 
 class BackendApplication:
-    def __init__(self):
+    def __init__(self, id, server_secret="0000", client_secret="0000"):
+        self.id             = id
+        self.server_secret  = server_secret
+        self.client_secret  = client_secret
+
         self.kernel = BackendKernel()
         self.fronts = {}
         self.context = BackendApplicationContext(self)
@@ -138,7 +144,19 @@ class BackendApplication:
     # Pipeline Event Management
     @asyncio.coroutine
     def onOpenningPipeline(self, pipeline):
+        # Send a random salt
+        salt = bcrypt.gensalt()
+        yield from pipeline.websocket.send(salt)
+
         handshake = yield from pipeline.websocket.recv()
+
+        m = re.search('REQUEST ([A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*)')
+        if m is None:
+            pipeline.abort()
+
+        encodedToken = m.group(0)
+        token = jwt.decode(encodedToken, self.client_secret, algorithms=['HS256'])
+
         yield from pipeline.websocket.send('handshake')
         result = yield from pipeline.websocket.recv()
         if result:
@@ -231,20 +249,34 @@ class BackendApplication:
             yield from asyncio.ensure_future(pipeline.wait_close())
             asyncio.get_event_loop().stop()
 
+    def findUsablePort(self):
+        port = 4242
+        found = False
+        while not found:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.bind(('127.0.0.1', port))
+                found = True
+            except socket.error as e:
+                port = port + 1
+            finally:
+                s.close()
+        return port
+
     def run(self):
-        self.start_server = websockets.serve(self.handler, '127.0.0.1', 4242, max_size=None)
+        port = self.findUsablePort()
+
+        self.start_server = websockets.serve(self.handler, '127.0.0.1', port, max_size=None)
 
         loop = asyncio.get_event_loop()
 
         #Sending ready signal
-        sys.stdout.write('Sending ready signal: ')
+        sys.stdout.write('Starting...\n')
         sys.stdout.flush()
-        sys.stdout.write('0x4D454F57')
-        sys.stdout.flush()
-        sys.stdout.write('\n')
+        sys.stdout.write('SERVING {} ON {}:{}\n'.format(self.id, '127.0.0.1', port))
         sys.stdout.flush()
 
-        logger.info('Started server at 127.0.0.1:4242')
+        logger.info('Started server at 127.0.0.1:{}'.format(port))
 
         self.kernelTask = asyncio.ensure_future(self.kernel.run())
         self.server = loop.run_until_complete(self.start_server)
