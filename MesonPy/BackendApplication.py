@@ -271,9 +271,9 @@ class BackendApplication:
         loop = asyncio.get_event_loop()
 
         #Sending ready signal
-        sys.stdout.write('Starting...\n')
+        print('Starting...')
         sys.stdout.flush()
-        sys.stdout.write('SERVING {} ON {}:{}\n'.format(self.id, '127.0.0.1', port))
+        print('SERVING {} ON {}:{}'.format(self.id, '127.0.0.1', port))
         sys.stdout.flush()
 
         logger.info('Started server at 127.0.0.1:{}'.format(port))
