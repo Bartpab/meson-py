@@ -6,4 +6,4 @@ class IncomingSecurityHandler(BaseReceivedMessageHandler):
         self.aes = aes
     def intercept(self, recvMsg):
         decoded = self.aes.decrypt(recvMsg).decode('utf-8')
-        return True, decoded
+        return decoded, False

@@ -6,5 +6,5 @@ class OutcomingSecurityHandler(BaseSendMessageHandler):
         BaseSendMessageHandler.__init__(self, parent)
         self.aes = aes
     def intercept(self, recvMsg):
-        encoded = encrypt(recvMsg, self.aes)
-        return True, encoded
+        encoded = encrypt(recvMsg, self.aes).encode('utf8')
+        return encoded, False
