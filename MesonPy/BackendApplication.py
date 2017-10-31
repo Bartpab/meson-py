@@ -5,22 +5,32 @@ import sys
 import functools
 import re
 import inspect
-import jwt
+import json
 import bcrypt
 import socket
-
-
+import os
+import pyscrypt
+import pyaes
+import binascii
+import hashlib
+from base64 import b64encode
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
 import MesonPy.Constants as Constants
 
 from MesonPy.FrontalController import BackendFrontalController
 from MesonPy.Processor.Kernel import BackendKernel, ServiceManager
 from MesonPy.Communication.Duplex import Duplex
 from MesonPy.Communication.Pipeline import CommunicationPipeline
+from MesonPy.AESCipher import encrypt
 
 from MesonPy.Communication.OutcomingHandler.FormatRouter import OutcomingJSONRouter
 from MesonPy.Communication.IncomingHandler.FormatRouter import IncomingJSONRouter
+from MesonPy.Communication.IncomingHandler.SecurityHandler import IncomingSecurityHandler
+from MesonPy.Communication.OutcomingHandler.SecurityHandler import OutcomingSecurityHandler
 
 from MesonPy.Service.ServiceInjector import ServiceInjector
+
 
 logger = logging.getLogger(__name__)
 
@@ -145,25 +155,60 @@ class BackendApplication:
     @asyncio.coroutine
     def onOpenningPipeline(self, pipeline):
         # Send a random salt
-        salt = bcrypt.gensalt()
+        salt = os.urandom(16)
         yield from pipeline.websocket.send(salt)
 
-        handshake = yield from pipeline.websocket.recv()
+        # Get the APP REQUEST from the client, encrypted with 256 bits AES key built on a PBKDF2 of the client secret
+        # REQUEST [Encrypted Token] WITH [IV]
+        request         = yield from pipeline.websocket.recv()
+        m               = re.search('REQUEST (?P<encoded>.*) WITH (?P<iv>.*)', request)
 
-        m = re.search('REQUEST ([A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*)')
         if m is None:
             pipeline.abort()
 
-        encodedToken = m.group(0)
-        token = jwt.decode(encodedToken, self.client_secret, algorithms=['HS256'])
+        encodedToken    = binascii.a2b_hex(m.group(1))
+        iv              = binascii.a2b_hex(m.group(2))
 
-        yield from pipeline.websocket.send('handshake')
-        result = yield from pipeline.websocket.recv()
-        if result:
-            frontalController = self.buildFrontalController(pipeline, result)
+        clientKEY       = hashlib.pbkdf2_hmac('sha1', self.client_secret.encode('utf-8'), salt, 1000, dklen=32)
+        clientAES       = AES.new(clientKEY, AES.MODE_CBC, iv)
+
+        decryptedToken  = re.search('({.*})', clientAES.decrypt(encodedToken).decode('utf-8').strip()).group(1)
+
+        logger.debug(decryptedToken)
+        token = json.loads(decryptedToken)
+
+        # Check request token
+        if token['salt'] is not salt and token['app_id'] is not self.id:
+            logger.warning('Invalid client request detected')
+            pipeline.abort()
+
+        serverKEY           = hashlib.pbkdf2_hmac('sha1', self.server_secret.encode('utf-8'), salt, 1000, dklen=32)
+        serverIV            = os.urandom(16)
+        serverAES           = AES.new(serverKEY, AES.MODE_CBC, serverIV)
+
+        # Generate a random AES key of 256 bits
+        session_randomKey   = hashlib.pbkdf2_hmac('sha1', os.urandom(32), salt, 1000, dklen=32)
+        session_randomIV    = os.urandom(16)
+        session_randomAES   = AES.new(session_randomKey, AES.MODE_CBC, session_randomIV)
+
+        replyObj            = {'key': binascii.b2a_hex(session_randomKey).decode('utf8'), 'alg': 'AES_256', 'iv': binascii.b2a_hex(session_randomIV).decode('utf8')}
+        replyToken          = json.dumps(replyObj)
+
+        encodedReplyToken   = binascii.b2a_hex(encrypt(replyToken, serverAES)).decode('utf8')
+
+        serverDecrypt = AES.new(serverKEY, AES.MODE_CBC, serverIV)
+
+        logger.info(serverDecrypt.decrypt(encodedReplyToken))
+
+        yield from pipeline.websocket.send('REPLY {} WITH {}'.format(encodedReplyToken, binascii.b2a_hex(serverIV).decode('utf8')))
+        protocol = yield from pipeline.websocket.recv()
+
+        if protocol:
+            frontalController = self.buildFrontalController(pipeline, protocol, session_randomAES)
             self.fronts[id(pipeline)] = frontalController
         else:
             pipeline.abort()
+
     def onClosingPipeline(self, pipeline):
         uid = id(pipeline)
         if uid in self.fronts:
@@ -209,8 +254,11 @@ class BackendApplication:
             logger.info('Serving action "{}" of controller "{}" as RPC "{}"'.format(name, controllerName, self.generateRPCName(controllerName, name)))
             self.rpcService.register(self.generateRPCName(controllerName, name), rpcAction(self, controller, action))
 
-    def buildFrontalController(self, pipeline, protocol='json'):
+    def buildFrontalController(self, pipeline, protocol='json', aes=None):
         logger.info('Building Frontal Controller on pipeline=%s, protocol=%s', pipeline, protocol)
+
+        if aes is None:
+            logger.warning('No AES had been defined.')
 
         if protocol not in ('json'):
             raise ValueError('Wrong protocol.')
@@ -218,12 +266,14 @@ class BackendApplication:
         # Build incoming pipeline
         incomingPipeline = pipeline.getIncomingPipeline()
         inRoot = incomingPipeline.getRootHandler()
-        incomingFormatRouter = IncomingJSONRouter(inRoot)
+        incomingSecurity = IncomingSecurityHandler(aes, inRoot)
+        incomingFormatRouter = IncomingJSONRouter(incomingSecurity)
 
         # Build outcoming pipeline
         outcomingPipeline = pipeline.getOutcomingPipeline()
         outRoot = outcomingPipeline.getRootHandler()
-        outcomingFormatRouter = OutcomingJSONRouter(outRoot)
+        outcomingSecurity = OutcomingSecurityHandler(outRoot)
+        outcomingFormatRouter = OutcomingJSONRouter(outcomingSecurity)
 
         lowerLevelDuplex = Duplex(incomingFormatRouter, outcomingFormatRouter)
         # Build our frontal controller and we are good to go

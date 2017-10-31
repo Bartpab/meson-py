@@ -52,6 +52,7 @@ class CommunicationPipeline:
 
     def getIncomingPipeline(self):
         return self.incomingPipeline
+
     def getOutcomingPipeline(self):
         return self.outcomingPipeline
 
