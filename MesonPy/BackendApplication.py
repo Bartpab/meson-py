@@ -204,7 +204,7 @@ class BackendApplication:
         protocol = yield from pipeline.websocket.recv()
 
         if protocol:
-            frontalController = self.buildFrontalController(pipeline, protocol, session_randomAES)
+            frontalController = self.buildFrontalController(pipeline, protocol, (session_randomKey, session_randomIV))
             self.fronts[id(pipeline)] = frontalController
         else:
             pipeline.abort()
@@ -272,7 +272,7 @@ class BackendApplication:
         # Build outcoming pipeline
         outcomingPipeline = pipeline.getOutcomingPipeline()
         outRoot = outcomingPipeline.getRootHandler()
-        outcomingSecurity = OutcomingSecurityHandler(outRoot)
+        outcomingSecurity = OutcomingSecurityHandler(aes, outRoot)
         outcomingFormatRouter = OutcomingJSONRouter(outcomingSecurity)
 
         lowerLevelDuplex = Duplex(incomingFormatRouter, outcomingFormatRouter)

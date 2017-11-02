@@ -1,4 +1,7 @@
-from MesonPy.Communication.IncomingHandler.BaseMessageReceiver import BaseReceivedMessageHandler 
+from MesonPy.Communication.IncomingHandler.BaseMessageReceiver import BaseReceivedMessageHandler
+import logging
+
+logger = logging.getLogger('Protocol.IN')
 
 class BaseFormatRouter(BaseReceivedMessageHandler):
     """
@@ -28,6 +31,7 @@ class IncomingJSONRouter(BaseFormatRouter):
             json.loads(recvMsg)
             return True
         except ValueError as e:
+            logger.error(e)
             return False
 
     def unwrap(self, recvMsg):

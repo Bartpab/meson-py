@@ -17,7 +17,7 @@ class InstructionContext:
         if self.future is not None:
             self.future.set_result(self)
     def __str__(self):
-        return 'operation={}, payload={}, {}'.format(self.operationType, self.payload, ('session={}'.format(str(self.session.id)) if self.session != None else 'no session known'))
+        return 'operation={}, {}'.format(self.operationType, ('session={}'.format(str(self.session.id)) if self.session != None else 'no session known'))
 
 class iInstruction:
     def canHandleInstruction(self, context):
