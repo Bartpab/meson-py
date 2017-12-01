@@ -16,11 +16,11 @@ class CleanCommand(Command):
 
 setup(
 	name='MesonPy',
-	version = "0.0.0-beta",
+	version = "0.0.1",
 	author = "Gael Pabois",
 	author_email = "gael.pabois@gmail.com",
 	packages = find_packages(),
-	url="https://bitbucket.org/base_idfics/libdefi",
+	url="https://github.com/Bartpab/meson-py",
 	license="LICENSE",
 	description="Websocket based python wrapper for Electron projects",
 	long_description=open('README.md').read(),
