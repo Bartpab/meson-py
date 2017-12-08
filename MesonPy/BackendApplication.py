@@ -86,10 +86,26 @@ class InstanceContext:
         self.session = session
         self.sharedServiceManager = sharedServiceManager
         self.localServiceManager = ServiceManager()
+        self.eventListeners = {}
+
+    def on(self, event, callback):
+        if event not in self.eventListeners:
+            self.eventListeners[event] = []
+        if callback not in self.eventListeners[event]:
+            self.eventListeners[event].append(callback)
+
+    def emit(self, event, **kargs):
+        if event in self.eventListeners:
+            for callback in self.eventListeners[event]:
+                callback(**kargs)
+
+
     def getSharedService(self, name):
         return self.sharedServiceManager.get(name)
+
     def getLocalService(self, name):
         return self.localServiceManager.get(name)
+
     def addLocalService(self, name, service):
         self.localServiceManager.register(name, service)
 
