@@ -17,13 +17,7 @@ class RPCInstruction:
 
     @asyncio.coroutine
     def executeLogic(self, procCtx):
-        executableMethod = procCtx.injectArgs(self.method)
-
-        ret = executableMethod()
-
-        if inspect.isgenerator(ret):
-            ret = yield from asyncio.ensure_future(executableMethod())
-
+        ret = yield from procCtx.execute(self.method)
         return ret
 
     def canHandleInstruction(self, instructionCtx):
@@ -45,6 +39,21 @@ class RPCExecutionContext:
         else:
             self.args = []
 
+    def execute(self, method):
+        args = []
+        kargs = {}
+        argspecs = inspect.getfullargspec(method)
+
+        if '__session__' in argspecs.args or '__session__' in argspecs.kwonlyargs:
+            kargs['__session__'] = self.session
+
+        if type(self.args) is dict:
+            kargs = {**kargs, **self.args}
+        elif type(self.args) is list:
+            args = args + self.args
+
+        return method(*args, **kargs)
+
     def injectArgs(self, method):
         if type(self.args) is dict:
             method = functools.partial(method, **self.args)
@@ -52,6 +61,7 @@ class RPCExecutionContext:
             method = functools.partial(method, *self.args)
 
         argspecs = inspect.getfullargspec(method)
+
         # Inject execution context
         if '__session__' in argspecs.args or '__session__' in argspecs.kwonlyargs:
             method = functools.partial(method, __session__=self.session)
@@ -109,7 +119,7 @@ class RPCProcessor(iProcessor):
 
             logger.info('Found executable logic for instruction request %s, logic=%s', instructionCtx, instruction)
             logger.info('Execute RPC %s', instructionCtx)
-            instructionCtx.ret = yield from asyncio.ensure_future(instruction.executeLogic(RPCExecutionContext(instructionCtx)))
+            instructionCtx.ret = yield from instruction.executeLogic(RPCExecutionContext(instructionCtx))
             logger.info('RPC %s had been executed', instructionCtx)
 
         except Exception as e:

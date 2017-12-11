@@ -30,21 +30,19 @@ from MesonPy.Communication.IncomingHandler.SecurityHandler import IncomingSecuri
 from MesonPy.Communication.OutcomingHandler.SecurityHandler import OutcomingSecurityHandler
 
 from MesonPy.Service.ServiceInjector import ServiceInjector
-
+from MesonPy.Service.TaskExecutor import TaskExecutor
 
 logger = logging.getLogger(__name__)
 
 def rpcAction(app, controller, action):
+    @asyncio.coroutine
     def wrapper(*args, __session__):
         instanceManager = app.getSharedService(Constants.SERVICE_INSTANCE)
-        keywords = [arg for arg in inspect.getfullargspec(action).args if (arg is not 'self' and arg is not 'instanceContext')]
-
-        kargs = {keywords[i]: args[i] for i in range(len(keywords))}
+        kargs = {}
         kargs['instanceContext'] = instanceManager.getBySession(__session__)
-
-        controllerAction = functools.partial(action, **kargs)
-
-        return controllerAction()
+        controllerAction = functools.partial(action, *args, **kargs)
+        ret = yield from controllerAction()
+        return ret
     return wrapper
 
 def fetchClasses(module, classes = None, visited = None, filter = None):
@@ -165,6 +163,7 @@ class BackendApplication:
     def boot(self):
         self.addSharedService(Constants.SERVICE_SERVICE_INJECTOR, ServiceInjector(self.context))
         self.addSharedService(Constants.SERVICE_INSTANCE, InstanceManager(self.context))
+        self.addSharedService(Constants.SERVICE_TASK_EXECUTOR, TaskExecutor(self.context))
         self.rpcService = self.getSharedService(Constants.SERVICE_RPC)
 
     # Pipeline Event Management
