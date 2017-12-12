@@ -41,12 +41,27 @@ class PubSubProcessor(iProcessor):
     def __init__(self):
         self.executionQueue = asyncio.Queue()
         self.context = PubSubContext()
+        self.idleFuture = None
 
     def canHandleOperation(self, instructionCtx):
         return instructionCtx.operationType == 'PUBSUB' and 'type' in instructionCtx.payload and 'topic' in instructionCtx.payload
 
     def push(self, instructionCtx):
-        asyncio.ensure_future(self.executionQueue.put(instructionCtx))
+        asyncio.ensure_future(self.co_push(instructionCtx))
+
+    @asyncio.coroutine
+    def co_push(self, instructionCtx):
+        yield from self.executionQueue.put(instructionCtx)
+        if (self.idleFuture is not None):
+            self.idleFuture.set_result(instructionCtx)
+
+    @asyncio.coroutine
+    def idle(self):
+        if (self.executionQueue.empty()):
+            self.idleFuture = asyncio.Future()
+            yield from self.idleFuture
+            self.idleFuture = None
+        return self
 
     def publish(self, topic, domain, payload, author=None, targets=None):
         if author != None:
@@ -92,7 +107,7 @@ class PubSubProcessor(iProcessor):
             instructionCtx = yield from self.executionQueue.get()
         except RuntimeError:
             return
-            
+
         if instructionCtx['type'] == 'subscribe':
             self.subscribeClient(instructionCtx.session,
                            instructionCtx.payload['topic'],

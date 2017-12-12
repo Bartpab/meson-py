@@ -100,26 +100,27 @@ class BackendKernel:
             logger.info('Exiting kernel')
 
     @asyncio.coroutine
+    def step_proc(self, proc):
+        instructionCtx = yield from proc.step(self.getContext())
+        logger.debug('Instruction done %s', instructionCtx)
+
+    @asyncio.coroutine
     def run(self):
-        tasks = {}
+        idles = {}
         while not self._close:
             try:
                 stackContext = self.getContext()
                 for proc in self.processors:
-                    if proc not in tasks:
-                        tasks[proc] = asyncio.ensure_future(proc.step(stackContext))
-                # Wait until one of the processors had finished its task
-                done, pending = yield from asyncio.wait([task for task in tasks.values()], return_when= asyncio.FIRST_COMPLETED)
-                #
-                logger.debug('Instructions done %s', done)
-                # Free the processor which task is done
-                free = []
-                for done_task in done:
-                    for proc, task in tasks.items():
-                        if task == done_task:
-                            free.append(proc)
-                for free_proc in free:
-                    tasks.pop(free_proc)
+                    if proc not in idles:
+                        idles[proc.__class__.__name__] = asyncio.ensure_future(proc.idle())
+
+                # Wait until one of the processors wakes up
+                awakens, idlings = yield from asyncio.wait([idle for idle in idles.values()], return_when=asyncio.FIRST_COMPLETED)
+                logger.debug('Processors awakened %s', list(awakens))
+                # Add the instruction processing to our event loop
+                for awakened_tasks in awakens:
+                    asyncio.ensure_future(self.step_proc(awakened_tasks.result()))
+                    del idles[awakened_tasks.result().__class__.__name__]
             except Exception as e:
                 logger.error(e)
 

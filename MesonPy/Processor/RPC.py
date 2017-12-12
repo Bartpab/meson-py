@@ -80,6 +80,7 @@ class RPCProcessor(iProcessor):
     def __init__(self):
         self.instructions = {}
         self.executionQueue = asyncio.Queue()
+        self.idleFuture = None
 
     def register(self, name, method):
         self.instructions[name] = RPCInstruction(name, method)
@@ -99,12 +100,25 @@ class RPCProcessor(iProcessor):
             return suitableInstructions[0]
 
     def push(self, instructionCtx):
-        asyncio.ensure_future(self.executionQueue.put(instructionCtx))
+        asyncio.ensure_future(self.co_push(instructionCtx))
+
+    @asyncio.coroutine
+    def co_push(self, instructionCtx):
+        yield from self.executionQueue.put(instructionCtx)
+        if (self.idleFuture is not None):
+            self.idleFuture.set_result(instructionCtx)
+
+    @asyncio.coroutine
+    def idle(self):
+        if (self.executionQueue.empty()):
+            self.idleFuture = asyncio.Future()
+            yield from self.idleFuture
+            self.idleFuture = None
+        return self
 
     @asyncio.coroutine
     def step(self, stackContext):
         logger.info('Step on %s', self)
-
         try:
             instructionCtx = yield from self.executionQueue.get()
         except RuntimeError:

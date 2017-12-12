@@ -30,6 +30,11 @@ class iProcessor:
         raise NotImplementedError()
     def push(self, instructionCtx):
         raise NotImplementedError()
+
+    @asyncio.coroutine
+    def idle(self):
+        pass
+
     @asyncio.coroutine
     def step(self, stackContext):
         raise NotImplementedError()
