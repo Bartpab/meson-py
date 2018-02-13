@@ -8,6 +8,7 @@ from MesonPy.Processor.RPC import RPCProcessor, RPCService
 from MesonPy.Processor.PubSub import PubSubProcessor, PubSubService
 
 logger = logging.getLogger(__name__)
+consoleLogger   = logging.getLogger('MESON')
 
 class Session:
     def __init__(self, sessionId, frontalController):
@@ -123,6 +124,7 @@ class BackendKernel:
                     del idles[awakened_tasks.result().__class__.__name__]
             except Exception as e:
                 logger.error(e)
+                consoleLogger.error(e)
 
     def findSuitableProcessor(self, instructionCtx):
         suitableProcessors = []

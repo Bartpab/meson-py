@@ -32,7 +32,13 @@ from MesonPy.Communication.OutcomingHandler.SecurityHandler import OutcomingSecu
 from MesonPy.Service.ServiceInjector import ServiceInjector
 from MesonPy.Service.TaskExecutor import TaskExecutor
 
-logger = logging.getLogger(__name__)
+logger          = logging.getLogger(__name__)
+consoleLogger   = logging.getLogger('MESON')
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+consoleFormatter = logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s')
+ch.setFormatter(consoleFormatter)
+consoleLogger.addHandler(ch)
 
 def rpcAction(app, controller, action):
     @asyncio.coroutine
@@ -129,9 +135,23 @@ class InstanceManager:
     def newInstance(self, session):
         instanceCtx = InstanceContext(session, self.sharedServiceManager)
 
+        localServices = []
+
         for localServiceCls in self.serviceInjector.getLocalServiceClasses():
             locServiceName = self.serviceInjector.generateLocalServiceName(localServiceCls)
-            instanceCtx.addLocalService(locServiceName, localServiceCls(instanceCtx))
+            localService = localServiceCls(instanceCtx)
+            localServices.append(localService)
+            instanceCtx.addLocalService(locServiceName, localService)
+
+        for localService in localServices:
+            if hasattr(localService, 'boot') == True:
+                logger.info('Booting local service {} for session {}'.format(localService.__class__.__name__, session.id))
+                localService.boot()
+
+        for localService in localServices:
+            if hasattr(localService, 'afterBoot') == True:
+                logger.info('After boot local service {} for session {}'.format(localService.__class__.__name__, session.id))
+                localService.afterBoot()
 
         self.instances[session.id] = instanceCtx
 
@@ -150,7 +170,7 @@ class BackendApplicationContext:
         return self.app.getSharedService(name)
 
 class BackendApplication:
-    def __init__(self, id, server_secret="0000", client_secret="0000"):
+    def __init__(self, id, server_secret="0000", client_secret="0000", singleClientMode=True):
         self.id             = id
         self.server_secret  = server_secret
         self.client_secret  = client_secret
@@ -158,6 +178,7 @@ class BackendApplication:
         self.kernel = BackendKernel()
         self.fronts = {}
         self.context = BackendApplicationContext(self)
+        self.singleClientMode = singleClientMode
         self.boot()
 
     def boot(self):
@@ -171,12 +192,15 @@ class BackendApplication:
     def onOpenningPipeline(self, pipeline):
         # Send a random salt
         salt = os.urandom(16)
+        consoleLogger.info('Sending nonce %s', salt)
         yield from pipeline.websocket.send(salt)
 
         # Get the APP REQUEST from the client, encrypted with 256 bits AES key built on a PBKDF2 of the client secret
         # REQUEST [Encrypted Token] WITH [IV]
-        request         = yield from pipeline.websocket.recv()
+        consoleLogger.info('Waiting for the client REQUEST %s', pipeline.websocket.remote_address)
+        request         = yield from asyncio.wait_for(pipeline.websocket.recv(), timeout=5)
         m               = re.search('REQUEST (?P<encoded>.*) WITH (?P<iv>.*)', request)
+        consoleLogger.info('REQUEST received from %s', pipeline.websocket.remote_address)
 
         if m is None:
             pipeline.abort()
@@ -197,6 +221,8 @@ class BackendApplication:
             logger.warning('Invalid client request detected')
             pipeline.abort()
 
+        consoleLogger.info('Request from %s is valid!', pipeline.websocket.remote_address)
+
         serverKEY           = hashlib.pbkdf2_hmac('sha1', self.server_secret.encode('utf-8'), salt, 1000, dklen=32)
         serverIV            = os.urandom(16)
         serverAES           = AES.new(serverKEY, AES.MODE_CBC, serverIV)
@@ -215,6 +241,7 @@ class BackendApplication:
 
         logger.info(serverDecrypt.decrypt(encodedReplyToken))
 
+        consoleLogger.info('Send the session key to %s', pipeline.websocket.remote_address)
         yield from pipeline.websocket.send('REPLY {} WITH {}'.format(encodedReplyToken, binascii.b2a_hex(serverIV).decode('utf8')))
         protocol = yield from pipeline.websocket.recv()
 
@@ -272,6 +299,8 @@ class BackendApplication:
     def buildFrontalController(self, pipeline, protocol='json', aes=None):
         logger.info('Building Frontal Controller on pipeline=%s, protocol=%s', pipeline, protocol)
 
+        consoleLogger.info('Building Frontal Controller on remote_addr=%s, protocol=%s', pipeline.websocket.remote_address, protocol)
+
         if aes is None:
             logger.warning('No AES had been defined.')
 
@@ -294,25 +323,48 @@ class BackendApplication:
         # Build our frontal controller and we are good to go
         return BackendFrontalController(self.kernel, lowerLevelDuplex)
 
+    def onWebsocketClose(self, websocket):
+        if self.singleClientMode == True:
+            asyncio.get_event_loop().stop()
+
     @asyncio.coroutine
     def handler(self, websocket, path):
         logger.info('New connection %s', websocket)
+        consoleLogger.info('New connection %s', websocket.remote_address)
+        consoleLogger.info('Building communication pipeline %s', websocket.remote_address)
         pipeline = CommunicationPipeline(websocket)
+
         try:
-            yield from self.onOpenningPipeline(pipeline)
+            consoleLogger.info('Openning communication pipeline %s', websocket.remote_address)
+            try:
+                yield from self.onOpenningPipeline(pipeline)
+                consoleLogger.info('Communication pipeline opened %s!', websocket.remote_address)
+            except asyncio.TimeoutError as e: # Try a second time
+                consoleLogger.info('Timeout on communication pipeline init, will try again...', websocket.remote_address)
+                yield from self.onOpenningPipeline(pipeline)
+                consoleLogger.info('Communication pipeline opened %s!', websocket.remote_address)
         except websockets.exceptions.ConnectionClosed as e:
+            consoleLogger.error('Cannot open communication pipeline for %s, because ', websocket.remote_address, e)
             logger.error(e)
-            asyncio.get_event_loop().stop()
+            self.onWebsocketClose(websocket)
             return
+        except asyncio.TimeoutError as e:
+            consoleLogger.error('Cannot open communication pipeline for %s in time...', websocket.remote_address)
+            logger.error(e)
+            self.onWebsocketClose(websocket)
+            return
+
         try:
             yield from pipeline.run()
         finally:
-            logger.info('Disconnection %s', websocket)
+            logger.info('Disconnection %s', websocket.remote_address)
+            consoleLogger.info('Disconnection %s', websocket.remote_address)
             self.onClosingPipeline(pipeline)
             pipeline.close()
             #Wait for the pipeline to close
             yield from asyncio.ensure_future(pipeline.wait_close())
-            asyncio.get_event_loop().stop()
+            self.onWebsocketClose(websocket)
+
 
     def findUsablePort(self):
         port = 4242
