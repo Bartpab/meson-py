@@ -1,0 +1,4 @@
+websockets
+pyaes
+pyscrypt
+pbkdf2
