@@ -13,6 +13,9 @@ class PushOperationRouter(BaseSendMessageHandler):
         logger.debug('Normalized push instruction %s, result=%s, id=%s', instruction, normalizedData, ticket)
         return normalizedData, False
 
+"""
+    Return the result of the instruction
+"""
 class BackendOperationReturnRouter(BaseSendMessageHandler):
     def intercept(self, sendMsg):
         ticket, instruction = sendMsg

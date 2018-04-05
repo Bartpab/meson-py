@@ -72,6 +72,7 @@ class PubSubProcessor(iProcessor):
         # Publish on given sessions
         if targets is not None:
             for session in targets:
+                # Push our little instruction to the session
                 session.front.push(InstructionContext('PUBSUB', {
                     'type': 'publish',
                     'topic': topic,
@@ -112,9 +113,11 @@ class PubSubProcessor(iProcessor):
             self.subscribeClient(instructionCtx.session,
                            instructionCtx.payload['topic'],
                            instructionCtx.payload['domain'] if 'domain' in instructionCtx.payload else '__default__')
+            instructionCtx.ret = True
 
         if instructionCtx['type'] == 'publish':
             self.publish(instructionCtx.session,
                          instructionCtx.payload['topic'],
                          instructionCtx.payload['domain'] if 'domain' in instructionCtx.payload else '__default__',
                          instructionCtx.payload['payload'] if 'payload' in instructionCtx.payload else None)
+            instructionCtx.ret = True

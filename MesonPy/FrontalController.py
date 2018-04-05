@@ -39,7 +39,7 @@ class BackendFrontalController:
     def __init__(self, kernel, lowerLevelDuplex):
         self.lowerLevelDuplex = lowerLevelDuplex
 
-        self.operationRequestDuplex = Duplex(BackendOperationRouter(self.lowerLevelDuplex.incoming),                                                            BackendOperationReturnRouter(self.lowerLevelDuplex.outcoming))
+        self.operationRequestDuplex = Duplex(BackendOperationRouter(self.lowerLevelDuplex.incoming), BackendOperationReturnRouter(self.lowerLevelDuplex.outcoming))
 
         self.pushHandler = PushOperationRouter(self.lowerLevelDuplex.outcoming)
 
@@ -75,7 +75,7 @@ class BackendFrontalController:
         pass
 
     def push(self, instructionCtx):
-        self.pushHandler.co.send(uuid4().int, instructionCtx)
+        self.pushHandler.co.send('-1', instructionCtx)
 
     def exit(self):
         pass
