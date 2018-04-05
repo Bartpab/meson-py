@@ -1,4 +1,6 @@
 websockets
 pyaes
-pyscrypt
 pbkdf2
+bcrypt
+pycryptodome
+
