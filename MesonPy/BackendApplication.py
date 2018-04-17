@@ -153,6 +153,10 @@ class InstanceManager:
                 logger.info('After boot local service {} for session {}'.format(localService.__class__.__name__, session.id))
                 localService.afterBoot()
 
+        for localService in localServices:
+            if hasattr(localService, 'bootDone') == True:
+                localService.bootDone()
+
         self.instances[session.id] = instanceCtx
 
         for callback in self.newCallbacks:

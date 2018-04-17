@@ -49,10 +49,11 @@ class ServiceInjector:
         for serviceClass in services:
             logger.info('Found local service class {}'.format(serviceClass.__name__))
             self.localServiceCls.append(serviceClass)
-
+        return services
     def addSharedServiceClasses(self, module):
         services = getServices(module)
         for serviceClass in services:
             logger.info('Found shared service class {}'.format(serviceClass.__name__))
             m = re.search(r"^(?P<name>\w+)Service$", serviceClass.__name__)
             self.appContext.addSharedService('services.shared.' + m.group('name'), serviceClass(self.appContext))
+        return services
