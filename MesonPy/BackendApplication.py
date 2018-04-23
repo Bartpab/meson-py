@@ -243,7 +243,7 @@ class BackendApplication:
 
         serverDecrypt = AES.new(serverKEY, AES.MODE_CBC, serverIV)
 
-        logger.info(serverDecrypt.decrypt(encodedReplyToken))
+        logger.info(serverDecrypt.decrypt(encodedReplyToken.encode('utf8')))
 
         consoleLogger.info('Send the session key to %s', pipeline.websocket.remote_address)
         yield from pipeline.websocket.send('REPLY {} WITH {}'.format(encodedReplyToken, binascii.b2a_hex(serverIV).decode('utf8')))
