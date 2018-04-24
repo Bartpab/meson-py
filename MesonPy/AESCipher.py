@@ -40,5 +40,4 @@ def unpad(bin_str):
 def decrypt(bin_data, aes):
     padded_bin_data = aes.decrypt(bin_data)
     unpadded_bin_data = unpad(padded_bin_data)
-    logger.debug(unpadded_bin_data)
     return unpadded_bin_data.decode('utf-8')

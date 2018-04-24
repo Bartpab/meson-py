@@ -10,57 +10,6 @@ from MesonPy.Processor.PubSub import PubSubProcessor, PubSubService
 logger = logging.getLogger(__name__)
 consoleLogger   = logging.getLogger('MESON')
 
-class Session:
-    def __init__(self, sessionId, frontalController):
-        self.front = frontalController
-        self.id = sessionId
-        self.closeCallbacks = []
-
-    def close(self):
-        for callback in self.closeCallbacks:
-            callback(self)
-
-    def onClose(self, callback):
-        if callback not in self.closeCallbacks:
-            self.closeCallbacks.append(callback)
-
-class SessionManager:
-    def __init__(self):
-        self._sessions = {}
-        self.newCallbacks = []
-        self.closeCallbacks = []
-
-    def onNew(self, callback):
-        self.newCallbacks.append(callback)
-
-    def generateId(self):
-        return uuid.uuid4().int
-
-    def sessions(self):
-        return self._sessions
-
-    def new(self, frontalController):
-        session = Session(self.generateId(), frontalController)
-        logger.info('New session, id={}'.format(session.id))
-        self._sessions[session.id] = session
-
-        # Call everybody who wants to know about a new session
-        for callback in self.newCallbacks:
-            callback(session)
-
-        return session
-
-    def remove(self, session):
-        self._sessions[session.id].close()
-        del self._sessions[session.id]
-
-class ServiceManager:
-    def __init__(self):
-        self.services = {}
-    def register(self, name, service):
-        self.services[name] = service
-    def get(self, name):
-        return self.services[name]
 
 class KernelContext:
     def __init__(self):

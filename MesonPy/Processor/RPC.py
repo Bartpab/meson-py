@@ -76,6 +76,7 @@ class RPCService:
 class UnknownRemoteProcedure(Exception):
     def __init__(self, procedureName):
         Exception.__init__(self, 'Unknown Remote Procedure "{}" is called'.format(procedureName))
+
 class RPCProcessor(iProcessor):
     def __init__(self):
         self.instructions = {}

@@ -41,8 +41,8 @@ class SendMessagePipeline:
 
 class CommunicationPipeline:
     def __init__(self, websocket):
-        self.sendQueue = asyncio.Queue()
-        self.receivedQueue = asyncio.Queue()
+        self.sendQueue      = asyncio.Queue()
+        self.receivedQueue  = asyncio.Queue()
         self._close = False
         self.websocket = websocket
         self.outcomingPipeline = SendMessagePipeline(self)
