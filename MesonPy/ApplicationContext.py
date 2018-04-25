@@ -8,3 +8,6 @@ class ApplicationContext:
     
     def getSharedService(self, name):
         return self._sharedServices[name]
+    
+    def getSharedServices(self):
+        return self._sharedServices

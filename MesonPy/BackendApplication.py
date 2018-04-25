@@ -32,37 +32,15 @@ from MesonPy.TaskExecutor    import TaskExecutor
 
 logger          = logging.getLogger(__name__)
 
-def fetchClasses(module, classes = None, visited = None, filter = None):
-    if classes is None:
-        classes = []
-    if visited is None:
-        visited = []
-
-    if module in visited:
-        return classes
-    else:
-        visited.append(module)
-
-    for name, obj in inspect.getmembers(module):
-        if inspect.isclass(obj):
-            if filter is not None:
-                if filter(obj):
-                    classes.append(obj)
-            else:
-                classes.append(obj)
-        elif inspect.ismodule(obj):
-            fetchClasses(obj, classes, visited, filter)
-    return classes
-
-def getControllers(controllerModule):
-    controllers = fetchClasses(controllerModule, None, None, lambda obj: re.match("(.*?)Controller", obj.__name__))
-    return controllers
-
 class BackendApplication:
     def __init__(self, id, server_secret="0000", client_secret="0000", singleClientMode=True):
         self.id             = id
         self.server_secret  = server_secret
         self.client_secret  = client_secret
+
+        self._onExitCallback        = []
+        self._onNewConnection       = []
+        self._onConnectionClosed    = []
 
         self.handlers = []
 
@@ -97,11 +75,6 @@ class BackendApplication:
         self.getConnectionStrategy().stack(SessionStrategy(self.getContext().getSharedService(Constants.SERVICE_SESSION)))
         self.getConnectionStrategy().stack(BackendRPCStrategy(self.getContext().getSharedService(Constants.SERVICE_RPC)))
 
-    def loadControllers(self, module):
-        controllers = getControllers(module)
-        
-        for controller in controllers:
-            self.getContext().getSharedService(Constants.SERVICE_CONTROLLER).add(controller())
 
     @asyncio.coroutine
     def handler(self, websocket, path):
@@ -117,6 +90,7 @@ class BackendApplication:
                 logger.info('Building backend pipeline...')
                 pipelineBuilder.build()
                 logger.info('The new connection is ready to be used!')
+                self.notifyNewConnection(handler)
                 yield from handler.getRunTask()
             else:
                 logger.warning('The connection does not match the current strategy.')
@@ -130,7 +104,39 @@ class BackendApplication:
         
         except Exception as e:
             logger.exception(e)
+        
+        finally:
+            self.notifyConnectionClosed(handler)
+            logger.info('Client has disconnected.')
+            if self.singleClientMode is True:
+                self.exit()
 
+    def onConnectionClosed(self, callback):
+        self._onNewConnection.append(callback)
+    
+    def notifyConnectionClosed(self, handler):
+        for callback in self._onConnectionClosed:
+            callback(self, handler)
+
+    def onNewConnection(self, callback):
+        self._onNewConnection.append(callback)
+    
+    def notifyNewConnection(self, handler):
+        for callback in self._onNewConnection:
+            callback(self, handler)
+
+    def onExited(self, callback):
+        self._onExitCallback.append(callback)
+    
+    def notifyExit(self):
+        for callback in self._onExitCallback:
+            callback(self)
+
+    def exit(self):
+        self.start_server.close()
+        self.notifyExit()
+        logger.info('Server is closed!')
+    
     def findUsablePort(self):
         port = 4242
         found = False
@@ -171,6 +177,7 @@ class BackendApplication:
 
         if run is True:
             loop.run_until_complete(runTask)
+            loop.run_forever()
         
         return runTask
 

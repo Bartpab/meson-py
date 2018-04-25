@@ -12,6 +12,7 @@ from MesonPy.CommunicationStrategies import AggregatedConnectionStrategy
 from MesonPy.CommunicationStrategies import SecuredFrontendConnectionStrategy
 from MesonPy.CommunicationStrategies import SerializerStrategy
 from MesonPy.CommunicationStrategies import NormalizerStrategy
+from MesonPy.CommunicationStrategies import FrontendRPCStrategy
 
 from MesonPy.Pipeline        import PipelineBuilder
 
@@ -19,6 +20,7 @@ from MesonPy.Instance        import InstanceManager
 from MesonPy.Session         import SessionManager
 from MesonPy.Normalizer      import NormalizerManager
 from MesonPy.Serializer      import SerializerManager
+from MesonPy.RPC             import FrontendRPCService
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +38,14 @@ class FrontendApplication:
         self._connectionStrategy    = AggregatedConnectionStrategy()
 
         self._connectedCallbacks    = []
+
+        self._handler           = None
+
         self.boot()
     
+    def exit(self):
+        self._handler.close('Exiting the application')
+
     def onConnected(self, callback):
         self._connectedCallbacks.append(callback)
 
@@ -48,13 +56,15 @@ class FrontendApplication:
         return self._connectionStrategy
 
     def boot(self):
+        self.getContext().addSharedService(Constants.SERVICE_RPC,                FrontendRPCService(self.getContext()))
         self.getContext().addSharedService(Constants.SERVICE_NORMALIZE,          NormalizerManager(self.getContext()))
         self.getContext().addSharedService(Constants.SERVICE_SERIALIZER,         SerializerManager(self.getContext()))
 
         self.getConnectionStrategy().stack(SecuredFrontendConnectionStrategy(self.id, self.server_secret, self.client_secret))
         self.getConnectionStrategy().stack(SerializerStrategy(self.getContext().getSharedService(Constants.SERVICE_SERIALIZER)))
         self.getConnectionStrategy().stack(NormalizerStrategy(self.getContext().getSharedService(Constants.SERVICE_NORMALIZE)))
-
+        self.getConnectionStrategy().stack(FrontendRPCStrategy(self.getContext().getSharedService(Constants.SERVICE_RPC)))
+    
     def notifyConnected(self):
         for callback in self._connectedCallbacks:
             callback(self)
@@ -76,6 +86,7 @@ class FrontendApplication:
                 self.notifyConnected()
                 logger.info('The frontend is ready!')
                  # Wait until the handler task is stopped
+                self._handler   = handler
                 yield from handler.getRunTask()
             else:
                 logger.error('The connection does not match the current strategy.')
@@ -100,6 +111,8 @@ class FrontendApplication:
     def init(self, run=True):
         loop    = asyncio.get_event_loop()
         runTask = asyncio.ensure_future(self.run())
+
+        self._runTask = runTask
 
         if run == True:
             loop.run_until_complete(runTask)

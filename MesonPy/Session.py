@@ -36,6 +36,5 @@ class SessionManager:
         return session
 
     def remove(self, session):
-        self._sessions[session.id].close()
         del self._sessions[session.id]
         for removeCallback in self.removedCallbacks: removeCallback(session)

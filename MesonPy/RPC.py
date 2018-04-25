@@ -1,6 +1,7 @@
 import inspect
 import functools
 import asyncio
+import logging
 
 class FrontendRPCService:
     def __init__(self, oRefFrontendRPCPipeline):
@@ -9,6 +10,9 @@ class FrontendRPCService:
     def setPipeline(self, oRefFrontendRPCPipeline):
         self._oRefFrontendRPCPipeline = oRefFrontendRPCPipeline
     
+    def getLogger(self):
+        return logging.getLogger('MesonPy.Frontend.RPC')
+
     def getPipeline(self):
         if self._oRefFrontendRPCPipeline is None:
             raise Exception('RPC is currently no possible because the pipeline had not been set.')
@@ -18,11 +22,25 @@ class FrontendRPCService:
     def isAvailable(self):
         return self._oRefFrontendRPCPipeline is not None
 
-    def rpc(self, name):
-        @asyncio.coroutine
+    def analyzeRPCResponse(self, name, fn):
+        try:
+            fn.result()
+        except asyncio.TimeoutError:
+            self.getLogger().warning('Timeout of RPC %s.', name)
+        except Exception as e:
+            self.getLogger().error(e)
+
+    def rpc(self, name, timeout=None):
         def wrapper(*args):
+            self.getLogger().debug('Request the execution of RPC %s', name)
             result = self.getPipeline().request(name, args)
-            return result
+            if timeout is not None:
+                callback = functools.partial(self.analyzeRPCResponse, name)
+                fn = asyncio.ensure_future(asyncio.wait_for(result, timeout))
+                fn.add_done_callback(callback)
+                return fn
+            else:
+                return result
         return wrapper 
 
 class BackendRPCService:
@@ -31,12 +49,17 @@ class BackendRPCService:
     
     @asyncio.coroutine
     def wrap(self, method):
-        ret = yield method
+        ret = yield from method()
         return ret
     
-    def schedule(self, name, args, session):
-        method = self.getRPC(name)
-        return asyncio.get_event_loop().ensure_future(functools.partial(self.wrap, self.injectArgs(session, method, args)))
+    def getLogger(self):
+        return logging.getLogger('MesonPy.Backend.RPC')
+
+    def handle(self, name, args, session):
+        self.getLogger().info('Schedule execution of RPC %s for %s', name, session.id)
+        method           = self.getRPC(name)
+        executableMethod = self.injectArgs(session, method, args)
+        return asyncio.ensure_future(self.wrap(executableMethod))
     
     def getRPC(self, name):
         return self._rpc[name]

@@ -32,7 +32,7 @@ class NormalizerManager:
         if type(node) is list:
             return [self.normalize(element) for element in node]
         elif type(node) is dict:
-            return {key: self.normalize(element) for key, element in node}
+            return {key: self.normalize(element) for key, element in node.items()}
         elif isinstance(node, numbers.Number):
             return node
         elif isinstance(node, str):
@@ -41,11 +41,9 @@ class NormalizerManager:
             depth1NormalizedDict = self.getNormalizer(oType)(node)
             
             normalizedObject     = {
-                '__obj__': oType.__name__
+                '__obj__': oType.__name__,
+                '__content__': self.normalize(depth1NormalizedDict)
             }
-            
-            for attrName, value in depth1NormalizedDict:
-                normalizedObject[attrName] = self.normalize(value)
             
             return normalizedObject
         else:

@@ -53,7 +53,7 @@ class NormalizerStrategy(IConnectionStrategy):
         return True
 
 from MesonPy.Pipeline import FrontendRPCPipeline
-class FrontendRPCPipeline(IConnectionStrategy):
+class FrontendRPCStrategy(IConnectionStrategy):
     def __init__(self, oRefFrontendRPCHandler):
         self._oRefFrontendRPCHandler = oRefFrontendRPCHandler
     
@@ -62,8 +62,9 @@ class FrontendRPCPipeline(IConnectionStrategy):
     
     @asyncio.coroutine
     def newConnection(self, socketHandler, pipelineBuilder):
-        pipelineBuilder.add(BackendRPCPipeline(self.getBackendRPCHandler()))
+        pipelineBuilder.add(FrontendRPCPipeline(self.getFrontendRPCHandler()))
         return True      
+        
 from MesonPy.Pipeline import BackendRPCPipeline
 class BackendRPCStrategy(IConnectionStrategy):
     def __init__(self, oRefBackendRPCHandler):

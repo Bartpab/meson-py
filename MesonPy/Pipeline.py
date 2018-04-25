@@ -5,6 +5,7 @@ import functools
 from Crypto.Cipher import AES
 from MesonPy.AESCipher import encrypt, decrypt
 
+import inspect
 import logging
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class PipelineBuilder:
 
     def build(self, parent=None):
         for pipeline in self.getChain():
-            pipeline.setParent(parent)
+            if parent is not None:pipeline.setParent(parent)
             parent = pipeline
         return self.getChain()[0]
 
@@ -74,20 +75,24 @@ class BasePipeline:
     
     def getParent(self):
         return self._parent
+    
     def getChilds(self):
         return self._childs
+    
     def setParent(self, parent):
         self._parent = parent
-    
+        parent.addChild(self)
+        
     def addChild(self, child):
-        child.setParent(self)
-        self._childs.append(child)   
+        self._childs.append(child)
 
     def onIncoming(self, interceptor):
         self.interceptIncoming(interceptor)
         if interceptor.shouldContinue():
             for child in self.getChilds():
                 child.onIncoming(interceptor)
+        else:
+            logger.debug('Pipeline propagation is stopped.')
     
     def onOutcoming(self, interceptor):
         self.interceptOutcoming(interceptor)
@@ -119,10 +124,14 @@ class SecurityPipeline(BasePipeline):
         return aes
     
     def interceptIncoming(self, interceptor):
-        oAES        = self.createAES()
-        encodedMsg  =  binascii.a2b_hex(interceptor.get())
-        strDecoded  = decrypt(encodedMsg, oAES)
-        interceptor.set(strDecoded)
+        try:
+            oAES        = self.createAES()
+            encodedMsg  =  binascii.a2b_hex(interceptor.get().strip())
+            strDecoded  = decrypt(encodedMsg, oAES)
+            interceptor.set(strDecoded)
+        except binascii.Error:
+            interceptor.stopPropagation()
+            logger.warning('Received message is not in hex format: %s', interceptor.get())
     
     def interceptOutcoming(self, interceptor):
         oAES            = self.createAES()
@@ -144,7 +153,7 @@ class SerializerPipeline(BasePipeline):
         return self._protocol
     
     def interceptIncoming(self, interceptor):
-        interceptor.set(self.getSerializerService().unserialize(interceptor.get(), protocol=self.getProtocol()))
+        interceptor.set(self.getSerializerService().deserialize(interceptor.get(), protocol=self.getProtocol()))
     
     def interceptOutcoming(self, interceptor):
         interceptor.set(self.getSerializerService().serialize(interceptor.get(), protocol=self.getProtocol()))
@@ -182,10 +191,19 @@ class SessionPipeline(BasePipeline):
     def interceptClose(self):
         self.getSessionManager().remove(self.getSession())
 
+class BackendRPCException(Exception):
+    def __init__(self, message, backendStackFrame=None):
+        Exception.__init__(self, message)
+        self._backendStackFrame = backendStackFrame
+    
+    def getBackendStack(self):
+        return self._backendStackFrame
 class FrontendRPCPipeline(BasePipeline):
-    def __init__(self):
+    def __init__(self, oRefFrontendRPCService):
+        BasePipeline.__init__(self)
         self._ticketCounter = 0
         self._currentFutures = {}
+        oRefFrontendRPCService.setPipeline(self)       
     
     def createTicket(self):
         self._ticketCounter += 1
@@ -203,7 +221,7 @@ class FrontendRPCPipeline(BasePipeline):
     def interceptIncoming(self, interceptor):
         normalizeData = interceptor.get()
 
-        if '__operation__' in normalizeData and normalizeData['__operation__'] == 'rpc':
+        if '__operation__' in normalizeData and normalizeData['__operation__'] == 'RPC':
             interceptor.stopPropagation()
             ticketId = normalizeData['__ticket__']
             error    = normalizeData['__error__'] if '__error__' in normalizeData else None
@@ -213,17 +231,23 @@ class FrontendRPCPipeline(BasePipeline):
             if future is None:
                 logger.warning('An answer to an unknown RPC has been received: %s', ticketId)
                 return
-
-            if error is not None:
-               error = Exception(error)
+            else:
+                logger.debug('Received return of the RPC request #%s', ticketId)
+            
+            if error is not None:    
+               error = BackendRPCException(error['message'], error['stack'] if 'stack' in error else None)
                future.set_exception(error)
             else:
                 future.set_result(ret)
 
+    def remove(self, ticketId, fn):
+        del self._currentFutures[ticketId]
+    
     def request(self, methodName, args):
         ticketId = self.createTicket()
         self._currentFutures[ticketId] = asyncio.Future()
-        
+        self._currentFutures[ticketId].add_done_callback(functools.partial(self.remove, ticketId))
+
         request = {
             '__ticket__': ticketId,
             '__operation__': 'RPC',
@@ -233,13 +257,16 @@ class FrontendRPCPipeline(BasePipeline):
             }
         }
 
+        logger.debug('Sending RPC request #%s to execute %s', ticketId, methodName)
+
         interceptor = PipelineInterception(request)
         self.onOutcoming(interceptor) # Send it 
         
         return self._currentFutures[ticketId]
     
     def onClosed(self):
-        for future in self.getCurrentFutures():
+        for ticketId, future in self.getCurrentFutures().items():
+            logger.warning('Cancelling the execution of RPC #%s', ticketId)
             future.cancel()
 
 class BackendRPCPipeline(BasePipeline):
@@ -256,24 +283,29 @@ class BackendRPCPipeline(BasePipeline):
             "__ticket__": ticket,
             "__operation__": 'RPC',
             "__return__": mixedResult,
-            "__error__": None,
-            "__stack__": None
+            "__error__": None
         }    
         interceptor = PipelineInterception(normalizedData)
         self.onOutcoming(interceptor) # Send it back
     
     def onFailed(self, methodName, oException, ticket, fn):
+        stack = [inspect.getframeinfo(frame) for frame in fn.get_stack()]
+        stack = [dict(frame._asdict()) for frame in stack]
+        
         normalizedData = {
             "__ticket__": ticket,
             "__operation__": 'RPC',
             "__return__": None,
-            "__error__": oException,
-            "__stack__": fn.get_stack()
+            "__error__": {
+                'stack': stack,
+                'message': str(oException),
+                'instance': oException
+            }
         }
 
         logger.error('RPC %s has failed because: %s', methodName, oException)
-        logger.error(fn.get_stack())
-        
+        logger.exception(oException)
+
         interceptor = PipelineInterception(normalizedData)
         self.onOutcoming(interceptor) # Send it back  
     
@@ -304,6 +336,7 @@ class BackendRPCPipeline(BasePipeline):
         for ticket, task in self._runningTasks:
             task.cancel()
     
+    
     """
         Attach RPC process task within the pipeline
     """
@@ -314,7 +347,8 @@ class BackendRPCPipeline(BasePipeline):
 
     def interceptIncoming(self, interceptor):
         session, recvMsg = interceptor.get()    
-        if '__operation__' in recvMsg and '__payload__' in recvMsg and '__ticket__':
+        logger.debug('Intercept message')
+        if '__operation__' in recvMsg and '__payload__' in recvMsg and '__ticket__' in recvMsg:
             ticket = recvMsg['__ticket__']
             if recvMsg['__operation__'] == 'RPC':
                 interceptor.stopPropagation()
@@ -322,10 +356,16 @@ class BackendRPCPipeline(BasePipeline):
                 methodName = payload['method']
                 args       = payload['kargs'] if 'kargs' in payload else (payload['args'] if 'args' in payload else [])
                 task        = self.getRPCHandler().handle(methodName, args, session)
-                self.attachProcessTask(task, methodName, ticket)
+                self.attachProcessTask(methodName, ticket, task)
     
     def interceptClose(self):
         self.cancelTasks()
+
+class BackendPubSub(BasePipeline):
+    def __init__(self, localPubSubService):
+        pass
+
+
 
 class PipelineEntry(BasePipeline):
     def __init__(self, connectionHandler):
@@ -341,4 +381,4 @@ class PipelineEntry(BasePipeline):
         self.send(strMessage)
 
     def send(self, rawMessage):
-        self.getConnectionHandler.send(rawMessage)
+        self.getConnectionHandler().send(rawMessage)

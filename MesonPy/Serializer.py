@@ -24,8 +24,8 @@ class SerializerManager:
     def getHandler(self, strProtocol):
         return self._protocolHandler[strProtocol]
 
-    def serialize(self, protocol, normalizedData):
+    def serialize(self, normalizedData, protocol):
         return self.getHandler(protocol).serialize(normalizedData)
     
-    def deserialize(self, protocol, strRawData):
+    def deserialize(self, strRawData, protocol):
         return self.getHandler(protocol).deserialize(strRawData)
