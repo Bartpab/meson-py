@@ -50,6 +50,7 @@ class ServiceInjector:
             logger.info('Found local service class {}'.format(serviceClass.__name__))
             self.localServiceCls.append(serviceClass)
         return services
+    
     def addSharedServiceClasses(self, module):
         services = getServices(module)
         for serviceClass in services:
