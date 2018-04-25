@@ -50,6 +50,7 @@ class BackendApplication:
         self.singleClientMode = singleClientMode
         self.boot()
 
+
     def getConnectionStrategy(self):
         return self._connectionStrategy
     
