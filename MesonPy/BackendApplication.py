@@ -53,19 +53,19 @@ class BackendApplication:
 
     def getConnectionStrategy(self):
         return self._connectionStrategy
-    
+
     def getContext(self):
         return self.context
-    
+
     def boot(self):
         # Register the most basic services
         self.getContext().addSharedService(Constants.SERVICE_RPC,                BackendRPCService(self.context))
         self.getContext().addSharedService(Constants.SERVICE_CONTROLLER,         ControllerManager(self.context))
-        
+
         self.getContext().addSharedService(Constants.SERVICE_SERVICE_INJECTOR,   ServiceInjector(self.context))
         self.getContext().addSharedService(Constants.SERVICE_SESSION,            SessionManager(self.context))
         self.getContext().addSharedService(Constants.SERVICE_INSTANCE,           InstanceManager(self.context))
-        
+
         self.getContext().addSharedService(Constants.SERVICE_NORMALIZE,          NormalizerManager(self.context))
         self.getContext().addSharedService(Constants.SERVICE_TASK_EXECUTOR,      TaskExecutor(self.context))
         self.getContext().addSharedService(Constants.SERVICE_SERIALIZER,         SerializerManager(self.context))
@@ -80,13 +80,13 @@ class BackendApplication:
     @asyncio.coroutine
     def handler(self, websocket, path):
         logger.info('New connection %s', websocket)
-        
+
         try:
             handler         = ConnectionHandler(websocket)
             pipelineBuilder = PipelineBuilder(handler.getRootPipeline())
-        
+
             keepConnected = yield from self.getConnectionStrategy().newConnection(websocket, pipelineBuilder)
-            
+
             if keepConnected is True:
                 logger.info('Building backend pipeline...')
                 pipelineBuilder.build()
@@ -96,16 +96,16 @@ class BackendApplication:
             else:
                 logger.warning('The connection does not match the current strategy.')
                 handler.close('Invalid connection.')
-        
+
         except websockets.exceptions.ConnectionClosed as e:
             handler.close(str(e))
-        
+
         except asyncio.TimeoutError as e:
             handler.close('Timeout from the client.')
-        
+
         except Exception as e:
             logger.exception(e)
-        
+
         finally:
             self.notifyConnectionClosed(handler)
             logger.info('Client has disconnected.')
@@ -114,30 +114,29 @@ class BackendApplication:
 
     def onConnectionClosed(self, callback):
         self._onNewConnection.append(callback)
-    
+
     def notifyConnectionClosed(self, handler):
         for callback in self._onConnectionClosed:
             callback(self, handler)
 
     def onNewConnection(self, callback):
         self._onNewConnection.append(callback)
-    
+
     def notifyNewConnection(self, handler):
         for callback in self._onNewConnection:
             callback(self, handler)
 
     def onExited(self, callback):
         self._onExitCallback.append(callback)
-    
+
     def notifyExit(self):
         for callback in self._onExitCallback:
             callback(self)
 
     def exit(self):
-        self.start_server.close()
         self.notifyExit()
         logger.info('Server is closed!')
-    
+
     def findUsablePort(self):
         port = 4242
         found = False
@@ -159,12 +158,12 @@ class BackendApplication:
         print('SERVING {} ON {}:{}'.format(self.id, '127.0.0.1', port))
         sys.stdout.flush()
         logger.info('Started server at 127.0.0.1:{}'.format(port))
-       
+
     @asyncio.coroutine
     def run(self, port, serverCo):
         self.notifyReadyStatusOnStdOut(port)
         yield from asyncio.ensure_future(serverCo)
-    
+
     """
         Init the server
         If run flag is set to False, will return the pending run task
@@ -179,6 +178,5 @@ class BackendApplication:
         if run is True:
             loop.run_until_complete(runTask)
             loop.run_forever()
-        
-        return runTask
 
+        return runTask
