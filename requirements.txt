@@ -3,4 +3,4 @@ pyaes
 pbkdf2
 bcrypt
 pycryptodome
-
+pyscrypt
