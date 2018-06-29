@@ -348,24 +348,37 @@ class BackendRPCPipeline(BasePipeline):
     def interceptIncoming(self, interceptor):
         session, recvMsg = interceptor.get()    
         logger.debug('Intercept message')
-        if '__operation__' in recvMsg and '__payload__' in recvMsg and '__ticket__' in recvMsg:
+        if '__operation__' in recvMsg and '__ticket__' in recvMsg:
             ticket = recvMsg['__ticket__']
-            if recvMsg['__operation__'] == 'RPC':
+            if recvMsg['__operation__'] == 'RPC' and '__payload__' in recvMsg:
                 interceptor.stopPropagation()
                 payload    = recvMsg['__payload__']
                 methodName = payload['method']
                 args       = payload['kargs'] if 'kargs' in payload else (payload['args'] if 'args' in payload else [])
                 task        = self.getRPCHandler().handle(methodName, args, session)
                 self.attachProcessTask(methodName, ticket, task)
-    
+            # RPC heartbeat
+            if recvMsg['__operation__'] == 'RPC_HEARTBEAT':
+                if ticket not in self._runningTasks:
+                    interceptor = PipelineInterception({
+                        '__operation__': 'RPC_HEARTBEAT',
+                        '__ticket__': ticket,
+                        '__status__': 'out'
+                    })
+                    self.onOutcoming(interceptor) # Send it back
+                else:
+                    interceptor = PipelineInterception({
+                        '__operation__': 'RPC_HEARTBEAT',
+                        '__ticket__': ticket,
+                        '__status__': 'still'
+                    })
+                    self.onOutcoming(interceptor) # Send it back
     def interceptClose(self):
         self.cancelTasks()
 
 class BackendPubSub(BasePipeline):
     def __init__(self, localPubSubService):
         pass
-
-
 
 class PipelineEntry(BasePipeline):
     def __init__(self, connectionHandler):

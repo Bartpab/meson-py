@@ -50,6 +50,7 @@ class BackendRPCService:
     @asyncio.coroutine
     def wrap(self, method):
         ret = yield from method()
+        self.getLogger().info(ret)
         return ret
     
     def getLogger(self):

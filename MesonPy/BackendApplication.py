@@ -90,6 +90,7 @@ class BackendApplication:
             if keepConnected is True:
                 logger.info('Building backend pipeline...')
                 pipelineBuilder.build()
+                handler.send('OK') # Send OK signal
                 logger.info('The new connection is ready to be used!')
                 self.notifyNewConnection(handler)
                 yield from handler.getRunTask()

@@ -233,7 +233,10 @@ class SecuredBackendConnectionStrategy:
         clientKEY       = hashlib.pbkdf2_hmac('sha1', self.getClientSecret().encode('utf-8'), bSalt, 1000, dklen=32)
         clientAES       = AES.new(clientKEY, AES.MODE_CBC, bIV)
 
-        decryptedToken  = re.search('({.*})', clientAES.decrypt(bEncodedToken).decode('utf-8').strip()).group(1)
+        str_decryptedToken = clientAES.decrypt(bEncodedToken).decode('utf-8')
+        self.getLogger().debug(str_decryptedToken)
+        
+        decryptedToken  = re.search('({.*})', str_decryptedToken).group(1)
         dictToken       = json.loads(decryptedToken)
     
     def createSessionKeys(self, bSalt):
