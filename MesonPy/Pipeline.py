@@ -2,7 +2,7 @@ import binascii
 import asyncio
 import functools
 
-from Crypto.Cipher import AES
+from Cryptodome.Cipher import AES
 from MesonPy.AESCipher import encrypt, decrypt
 
 import inspect

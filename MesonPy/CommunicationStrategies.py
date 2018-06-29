@@ -14,8 +14,8 @@ import pyaes
 import binascii
 import hashlib
 from base64 import b64encode
-from Crypto.Cipher import AES
-from Crypto.Protocol.KDF import PBKDF2
+from Cryptodome.Cipher import AES
+from Cryptodome.Protocol.KDF import PBKDF2
 import MesonPy.Constants as Constants
 from MesonPy.AESCipher import encrypt
 
