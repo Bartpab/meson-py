@@ -61,6 +61,7 @@ class ConnectionHandler:
         logger.debug('Sending message, ticket is %s', ticketId)
         yield from self.getSocketHandler().send(message)      
         logger.debug('Sent message, ticket is %s', ticketId)
+   
     """
         Send back the message, will create a ticket to track if it has been sent or failed a number of 
         time
