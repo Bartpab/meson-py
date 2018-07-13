@@ -1,4 +1,5 @@
 from MesonPy.FrontendApplication import FrontendApplication
+
 from MesonPy.BackendApplication import BackendApplication
 
 import asyncio
@@ -7,12 +8,6 @@ import signal
 import sys
 logger = logging.getLogger('TEST')
 logging.getLogger().setLevel(logging.DEBUG)
-
-ch = logging.StreamHandler(sys.stdout)
-ch.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s -  %(levelname)s - %(name)s\t - %(message)s')
-ch.setFormatter(formatter)
-logging.getLogger().addHandler(ch)
 
 from MesonPy.Constants import SERVICE_RPC
 

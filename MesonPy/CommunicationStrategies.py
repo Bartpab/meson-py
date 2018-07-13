@@ -124,7 +124,7 @@ class SecuredFrontendConnectionStrategy:
     @asyncio.coroutine
     def getServerNonce(self, socketHandler):
         bSalt = yield from socketHandler.recv()
-        self.getLogger().debug('Received nonce from backend %s', bSalt)
+        self.getLogger().info('Received nonce from backend %s', bSalt)
         return bSalt
     
     @asyncio.coroutine
@@ -141,19 +141,19 @@ class SecuredFrontendConnectionStrategy:
         bEncodedIV         = binascii.b2a_hex(bIV).decode('utf8')
         request            = 'REQUEST {} WITH {}'.format(bEncodedReplyToken, bEncodedIV)
 
-        self.getLogger().debug('Sending request %s', request)
+        self.getLogger().info('Sending request %s', request)
 
         yield from socketHandler.send(request)
     
     @asyncio.coroutine
     def getSessionKeyAndIV(self, socketHandler, bSalt):
-        self.getLogger().debug('Waiting for reply')
+        self.getLogger().info('Waiting for reply')
         
-        reply = yield from asyncio.wait_for(socketHandler.recv(), timeout=10)
+        reply = yield from asyncio.wait_for(socketHandler.recv(), timeout=30)
         
         yield from socketHandler.send('OK')
         
-        self.getLogger().debug('Received reply %s', reply)
+        self.getLogger().info('Received reply %s', reply)
         
         m        = re.search('REPLY (?P<encoded>.*) WITH (?P<iv>.*)', reply)
         
@@ -218,8 +218,8 @@ class SecuredBackendConnectionStrategy:
     # REQUEST [Encrypted Token] WITH [IV]
     @asyncio.coroutine
     def getEncryptedClientRequest(self, socketHandler):
-        request = yield from asyncio.wait_for(socketHandler.recv(), timeout=5)
-        self.getLogger().debug('Received request: %s', request)
+        request = yield from asyncio.wait_for(socketHandler.recv(), timeout=15)
+        self.getLogger().info('Received request: %s', request)
         m       = re.search('REQUEST (?P<encoded>.*) WITH (?P<iv>.*)', request)
         if m is None:
             return None
@@ -234,7 +234,7 @@ class SecuredBackendConnectionStrategy:
         clientAES       = AES.new(clientKEY, AES.MODE_CBC, bIV)
 
         str_decryptedToken = clientAES.decrypt(bEncodedToken).decode('utf-8')
-        self.getLogger().debug(str_decryptedToken)
+        self.getLogger().info(str_decryptedToken)
         
         decryptedToken  = re.search('({.*})', str_decryptedToken).group(1)
         dictToken       = json.loads(decryptedToken)
@@ -267,13 +267,13 @@ class SecuredBackendConnectionStrategy:
                 binascii.b2a_hex(serverIV).decode('utf8')
         )
         
-        self.getLogger().debug('Sending reply %s', reply)
+        self.getLogger().info('Sending reply %s', reply)
         yield from socketHandler.send(reply)
-        self.getLogger().debug('Reply sent!')
+        self.getLogger().info('Reply sent!')
 
         # Confirm the reception
         try:
-            yield from asyncio.wait_for(socketHandler.recv(), timeout=3)
+            yield from asyncio.wait_for(socketHandler.recv(), timeout=30)
         except asyncio.TimeoutError:
             yield from socketHandler.send(reply)
 
@@ -323,12 +323,12 @@ class AggregatedConnectionStrategy(IConnectionStrategy):
     @asyncio.coroutine
     def newConnection(self, socketHandler, pipelineBuilder):
         for connStrat in self.getStack():
-            self.getLogger().debug('Calling connection strategy: %s', connStrat.__class__.__name__)
+            self.getLogger().info('Calling connection strategy: %s', connStrat.__class__.__name__)
             keep = yield from connStrat.newConnection(socketHandler, pipelineBuilder)
             if not keep: 
                 self.getLogger().warning('Connection strategy "%s" has refused the current connection.', connStrat.__class__.__name__)
                 return False
-            self.getLogger().debug('Connection strategy "%s" has validated the current connection.', connStrat.__class__.__name__)
+            self.getLogger().info('Connection strategy "%s" has validated the current connection.', connStrat.__class__.__name__)
         return True
 
     def closedConnection(self, socketHandler):

@@ -92,7 +92,7 @@ class BasePipeline:
             for child in self.getChilds():
                 child.onIncoming(interceptor)
         else:
-            logger.debug('Pipeline propagation is stopped.')
+            logger.info('Pipeline propagation is stopped.')
     
     def onOutcoming(self, interceptor):
         self.interceptOutcoming(interceptor)
@@ -232,7 +232,7 @@ class FrontendRPCPipeline(BasePipeline):
                 logger.warning('An answer to an unknown RPC has been received: %s', ticketId)
                 return
             else:
-                logger.debug('Received return of the RPC request #%s', ticketId)
+                logger.info('Received return of the RPC request #%s', ticketId)
             
             if error is not None:    
                error = BackendRPCException(error['message'], error['stack'] if 'stack' in error else None)
@@ -257,7 +257,7 @@ class FrontendRPCPipeline(BasePipeline):
             }
         }
 
-        logger.debug('Sending RPC request #%s to execute %s', ticketId, methodName)
+        logger.info('Sending RPC request #%s to execute %s', ticketId, methodName)
 
         interceptor = PipelineInterception(request)
         self.onOutcoming(interceptor) # Send it 
@@ -347,7 +347,7 @@ class BackendRPCPipeline(BasePipeline):
 
     def interceptIncoming(self, interceptor):
         session, recvMsg = interceptor.get()    
-        logger.debug('Intercept message')
+        logger.info('Intercept message')
         if '__operation__' in recvMsg and '__ticket__' in recvMsg:
             ticket = recvMsg['__ticket__']
             if recvMsg['__operation__'] == 'RPC' and '__payload__' in recvMsg:
@@ -359,7 +359,9 @@ class BackendRPCPipeline(BasePipeline):
                 self.attachProcessTask(methodName, ticket, task)
             # RPC heartbeat
             if recvMsg['__operation__'] == 'RPC_HEARTBEAT':
+                logger.info('RPC heartbeat request for "{}"'.format(ticket))
                 if ticket not in self._runningTasks:
+                    logger.warning('No RPC is running as "{}"'.format(ticket))
                     interceptor = PipelineInterception({
                         '__operation__': 'RPC_HEARTBEAT',
                         '__ticket__': ticket,
@@ -367,6 +369,7 @@ class BackendRPCPipeline(BasePipeline):
                     })
                     self.onOutcoming(interceptor) # Send it back
                 else:
+                    logger.warning('A RPC is still running as "{}"'.format(ticket))
                     interceptor = PipelineInterception({
                         '__operation__': 'RPC_HEARTBEAT',
                         '__ticket__': ticket,
