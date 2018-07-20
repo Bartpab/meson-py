@@ -63,6 +63,8 @@ class BackendRPCService:
         return asyncio.ensure_future(self.wrap(executableMethod))
     
     def getRPC(self, name):
+        if name not in self._rpc:
+            raise ValueError('No RPC called {} exists.'.format(name))
         return self._rpc[name]
 
     def register(self, name, method):
