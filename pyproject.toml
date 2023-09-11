@@ -1,0 +1,15 @@
+[project]
+name = "MesonPy"
+version = "0.0.1"
+authors = [{name = "Gael Pabois", email = "gael.pabois@gmail.com"}]
+# license="LICENSE"  # no license is specified
+description= "Websocket based python wrapper for Electron projects"
+dependencies = ["websockets", "pyaes", "pbkdf2", "bcrypt", "pycryptodome", "pyscrypt"]
+dynamic = ["readme"]
+
+[project.urls]
+home-page = "https://github.com/Bartpab/meson-py"
+
+[build-system]
+requires = ["setuptools>65.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
